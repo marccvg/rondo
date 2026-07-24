@@ -124,6 +124,36 @@ def load_champions():
     return out
 
 
+def load_europa():
+    """Europa League parcial (24/25 y 25/26 vía Wikipedia scrapper)."""
+    europa_path = ROOT / "data/raw/europa/europa_league_wikipedia.parquet"
+    if not europa_path.exists():
+        print("(Europa parquet no existe, skip)")
+        return pd.DataFrame()
+    df = pd.read_parquet(europa_path)
+    df["home_team_norm"] = df["home_team"].apply(lambda t: CHAMPIONS_ALIAS.get(t, t))
+    df["away_team_norm"] = df["away_team"].apply(lambda t: CHAMPIONS_ALIAS.get(t, t))
+    # Fechas ficticias por temporada (mediana de temporada Europa)
+    season_to_date = {"24-25": "2024-11-15", "25-26": "2025-11-15"}
+    df["date"] = pd.to_datetime(df["season"].map(season_to_date))
+    out = pd.DataFrame({
+        "date": df["date"],
+        "league": "europa",
+        "season": df["season"].apply(lambda s: f"20{s[:2]}-{s[3:5]}"),
+        "home_team": df["home_team_norm"],
+        "away_team": df["away_team_norm"],
+        "home_goals": df["home_goals"].astype("Int64"),
+        "away_goals": df["away_goals"].astype("Int64"),
+        "result": df.apply(lambda r: "H" if r["home_goals"] > r["away_goals"]
+                          else ("A" if r["home_goals"] < r["away_goals"] else "D"), axis=1),
+        "pinnacle_home": float("nan"),
+        "pinnacle_draw": float("nan"),
+        "pinnacle_away": float("nan"),
+        "competition": "europa_league",
+    })
+    return out
+
+
 def main():
     print(">>> Merge multi-competición")
     dom = load_domestic()
@@ -131,6 +161,9 @@ def main():
 
     champs = load_champions()
     print(f"Champions:  {len(champs):,} partidos")
+
+    europa = load_europa()
+    print(f"Europa:     {len(europa):,} partidos")
 
     # Filtrar champions solo desde 2017-08 (que es cuando arranca nuestro dataset)
     champs_filtered = champs[champs["date"] >= dom["date"].min()].copy()
@@ -141,10 +174,9 @@ def main():
     champ_teams = set(champs_filtered["home_team"]) | set(champs_filtered["away_team"])
     new_teams = champ_teams - known_teams
     print(f"Equipos Champions NO conocidos: {len(new_teams)} (empezarán ELO 1500)")
-    print(f"  Muestra: {sorted(list(new_teams))[:20]}")
 
     # Unificar
-    combined = pd.concat([dom, champs_filtered], ignore_index=True)
+    combined = pd.concat([dom, champs_filtered, europa], ignore_index=True)
     combined = combined.sort_values("date").reset_index(drop=True)
     combined = combined.dropna(subset=["home_goals", "away_goals"])
 
