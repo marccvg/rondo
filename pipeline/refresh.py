@@ -44,6 +44,7 @@ FD_LEAGUES = {
     "I1": "Serie A",
     "D1": "Bundesliga",
     "F1": "Ligue 1",
+    "P1": "Primeira Liga",   # Portugal
 }
 
 INITIAL_SEASON_YEAR = 2017  # temporada 17/18 = primera del dataset

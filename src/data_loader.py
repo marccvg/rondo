@@ -19,6 +19,7 @@ LEAGUE_MAP = {
     "I1": "seriea",
     "D1": "bundesliga",
     "F1": "ligue1",
+    "P1": "portugal",
 }
 
 # Football-Data.co.uk columnas de cuotas Pinnacle de cierre
