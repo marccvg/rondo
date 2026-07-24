@@ -87,6 +87,77 @@ def clean_team(t: str) -> str:
     return t
 
 
+def extract_from_group_standings(html: str, season_label: str) -> list[dict]:
+    """Extrae de standings de group stage clásico.
+    Wikipedia usa formato: [Pos, Team, Pld, W, D, L, GF, GA, GD, Pts, Qualification, ...códigos rival 3-letras...]
+    Las últimas N columnas son códigos de 3 letras del rival, celdas contienen 'X–Y' resultado.
+    """
+    try:
+        tables = pd.read_html(StringIO(html))
+    except Exception:
+        return []
+
+    partidos = []
+    for t in tables:
+        if isinstance(t.columns, pd.MultiIndex):
+            t.columns = [" ".join(str(c).strip() for c in col if c and str(c) != "nan").strip()
+                         for col in t.columns]
+        cols = [str(c) for c in t.columns]
+        # Detectar: columnas típicas standings + N columnas al final que parecen códigos 3-letras
+        standings_cols = {"Pos", "Team", "Teamvte", "Pld", "W", "D", "L", "GF", "GA", "GD", "Pts"}
+        matched_std = sum(1 for c in cols if c in standings_cols)
+        if matched_std < 5:
+            continue
+        # Encontrar columna Team
+        team_col = next((c for c in cols if "team" in c.lower()), None)
+        if not team_col:
+            continue
+        # Encontrar columnas de códigos: al final, 3-4 letras mayúsculas
+        code_cols = [c for c in cols if len(c) == 3 and c.isupper() and c.isalpha()]
+        if len(code_cols) < 3:
+            continue
+        # Mapear: código 3-letras → nombre completo
+        # Los códigos suelen ser primeras 3 letras del nombre en mayúscula
+        teams_in_group = [clean_team(str(v)) for v in t[team_col] if clean_team(str(v))]
+        code_to_full = {}
+        for full in teams_in_group:
+            # Generar candidatos código posibles
+            candidates = [full[:3].upper()]
+            words = full.split()
+            if len(words) > 1:
+                candidates.append("".join(w[0] for w in words[:3]).upper())
+            for c in candidates:
+                if c in code_cols and c not in code_to_full:
+                    code_to_full[c] = full
+                    break
+        # Si no matcheamos los códigos por naming, matchear por posición (mismo orden filas ~ columnas)
+        if len(code_to_full) < len(code_cols):
+            # Assumir que orden columnas código = orden equipos en tabla
+            code_to_full = {code_cols[i]: teams_in_group[i] for i in range(min(len(code_cols), len(teams_in_group)))}
+
+        # Extraer partidos
+        for _, row in t.iterrows():
+            home = clean_team(str(row[team_col]))
+            if not home:
+                continue
+            for code in code_cols:
+                away = code_to_full.get(code)
+                if not away or away == home:
+                    continue
+                score = parse_score(row[code])
+                if score is None:
+                    continue
+                partidos.append({
+                    "home_team": home,
+                    "away_team": away,
+                    "home_goals": score[0],
+                    "away_goals": score[1],
+                    "season": season_label,
+                    "phase": "group_stage",
+                })
+    return partidos
+
+
 def extract_from_cross_tables(html: str, season_label: str) -> list[dict]:
     """Extrae resultados de tablas cruzadas de group stage clásico.
     Detecta: si columnas (después de header) contienen nombres de equipos
@@ -224,8 +295,9 @@ def scrape_competition(competition: str, seasons: list[tuple[int, int]]) -> pd.D
             html = fetch(url)
             if not html:
                 continue
-            # Probar ambos parsers
+            # Probar todos los parsers
             partidos = extract_from_linear_tables(html, season_label)
+            partidos += extract_from_group_standings(html, season_label)
             partidos += extract_from_cross_tables(html, season_label)
             new = 0
             for p in partidos:
