@@ -3,7 +3,7 @@
 **Proyecto**: sistema predictivo de resultados de partidos (5 grandes ligas + Champions)
 **Referencia idea**: `/home/claude/ideas/sistema/idea-272-sistema-elo-poisson-prediccion-futbol-champions.md`
 **Creado**: 2026-07-24
-**Estado global**: Fase 1 completada 2026-07-24 con resultados excepcionales — baseline a solo **2.6% del log-loss de Pinnacle** usando SOLO ELO como feature. Fase 2 (feature engineering completo) siguiente.
+**Estado global**: v1 COMPLETADO 2026-07-24. Fases 1-6 cerradas. Ratio promedio backtest 3 temporadas = 1.020 vs Pinnacle (a 2% consistente). Dashboard Streamlit funcional. Extensiones v2 (Familia D jugador granular, Champions, tracking live) documentadas en roadmap.
 **Duración estimada**: 10 semanas de trabajo real (asumiendo dedicación intermitente)
 
 ---
@@ -242,6 +242,40 @@ futbol_elo_poisson/
 - **Datos Transfermarkt**: sin API oficial, scraping frágil. Mitigar: fallback a features "sin plantilla" si el scraper cae; el modelo debe funcionar con missing en Familia D.
 
 ---
+
+## Extensiones futuras post-v1 (roadmap actualizado 2026-07-24)
+
+### Datos jugador granular — Familia D real
+- **Ingesta FBref player_match_stats**: goles/xG/minutos/pases progresivos/tackles/presiones/duelos por jugador y partido. Requiere ~1-2h scraping equipo-por-equipo.
+- **Alineaciones canónicas por partido**: extraer titulares desde FBref schedule (Formation column) + StatsBomb open donde cubra.
+- **Transfermarkt scraper**: lesiones activas + sanciones + valores mercado + contratos. Sin API oficial, scraping con delay ~2s por request.
+- **Sofifa scraper**: ratings jugador anual (proxy importancia para ponderación).
+- **Features derivadas (~30 features agregadas al equipo)**:
+  - Σ xG generado últimos 5 partidos por los 4 delanteros titulares
+  - Precisión pases % últimos 10 de los 3 mediocentros
+  - % duelos ganados últimos 10 de los 4 defensas
+  - Save % últimos 10 del portero
+  - Minutos acumulados 7/14/30d de la alineación esperada (fatiga colectiva)
+  - Lesiones activas ponderadas por Sofifa × prob_titular
+  - Rotación esperada (alineación probable vs canónica)
+- **Impacto esperado**: 3-8% adicional mejora log-loss según literatura (Kloosterman 2020). Realista cerrar 20-40% del gap restante contra Pinnacle.
+
+### Análisis táctico en tiempo real (live)
+- Requiere tracking data (Second Spectrum / StatsBomb 360 / Signality) — no disponible en open. Deferimiento indefinido salvo hardware propio.
+- Alternativa low-cost: MCU + IMU en jugadores de amateur/juvenil (idea-271-like) para captura casera.
+- Features candidatos: compactness live, PPDA rolling 5min, xT por posesión, detección deriva de rol vs baseline canónico jugador.
+
+### Champions League
+- Añadir vía custom `~/soccerdata/config/league_dict.json` apuntando a `https://fbref.com/en/comps/8/Champions-League-Stats`.
+
+### Player embeddings (bloqueado por datos jugador)
+- word2vec-style aprendido de secuencias de acciones por jugador → representación vectorial que captura similitudes tácticas no visibles en tabla estadística.
+- Requisito: StatsBomb events (~1.5 GB) o event-level equivalente.
+- Aplicación principal: idea-273 (scouting big data) — no v1.
+
+### Otras ligas
+- Championship, Segunda División, Serie B, Ligue 2, 2. Bundesliga — extender simple.
+- Ligas nórdicas 2ª div, MLS Next Pro, Championship escocesa — sin datos Understat, requerirían fuentes específicas.
 
 ## Decisiones abiertas (pendientes de resolver durante Fase 0-1)
 
