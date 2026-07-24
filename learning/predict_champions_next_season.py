@@ -272,7 +272,7 @@ def main():
         print(f"  {t:25s} {format_percent(c/N_SIMS)}")
 
     print(f"\n\n╔═══════════════════════════════════════════════╗")
-    print(f"║   🏆  CAMPEÓN CHAMPIONS 2025/26 (predicción)    ║")
+    print(f"║   🏆  CAMPEÓN CHAMPIONS 2026/27 (predicción)    ║")
     print(f"╚═══════════════════════════════════════════════╝\n")
     for i, (t, c) in enumerate(champions_c.most_common(15), 1):
         icon = "🏆" if i == 1 else ("🥈" if i == 2 else ("🥉" if i == 3 else "  "))
