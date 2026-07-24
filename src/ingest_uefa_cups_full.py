@@ -328,10 +328,19 @@ def urls_for(competition: str, y1: int, y2: int) -> list[str]:
         raise ValueError(competition)
 
     return [
+        # Fase principal
         f"https://en.wikipedia.org/wiki/{slug}_{base}_league_phase",     # 24/25+
         f"https://en.wikipedia.org/wiki/{slug}_{base}_group_stage",     # <=23/24
+        # Knockout
         f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_phase",
         f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_stage",
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_round_play-offs",
+        # Qualifying rounds (equipos menores, pre-group stage)
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying_rounds_and_play-off_round",
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_first_qualifying_round",
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_second_qualifying_round",
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_third_qualifying_round",
+        f"https://en.wikipedia.org/wiki/{slug}_{base}_play-off_round",
     ]
 
 
