@@ -1,0 +1,26 @@
+# Fase 0-2 (ingesta + baseline)
+soccerdata>=1.8
+pandas>=2.2
+duckdb>=1.0
+pyarrow>=15
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+jupyter>=1.0
+
+# Fase 1-4 (modelos)
+statsmodels>=0.14
+scipy>=1.13
+scikit-learn>=1.5
+
+# Fase 3 (LightGBM + tuning)
+lightgbm>=4.3
+optuna>=3.6
+shap>=0.45
+
+# Fase 6 (dashboard)
+streamlit>=1.35
+
+# Dev / tests
+pytest>=8.0
+nbstripout>=0.7
