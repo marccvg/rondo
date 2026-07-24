@@ -174,6 +174,38 @@ def rebuild_matches_parquet():
     return df
 
 
+def refresh_champions():
+    """Bajar/actualizar Champions League de openfootball."""
+    print("\n🏆 Fase 3b — actualizar Champions League (openfootball)")
+    import subprocess
+    result = subprocess.run(
+        [str(ROOT / "venv/bin/python"), str(ROOT / "src/ingest_champions.py")],
+        capture_output=True, text=True, timeout=120,
+    )
+    for line in result.stdout.splitlines()[-6:]:
+        print(f"   {line}")
+
+
+def rebuild_multi_and_elo():
+    """Fusiona domestic + Champions, recomputa ELO cross-league."""
+    print("\n🔀 Fase 4b — merge multi-competición + ELO cross-league")
+    import subprocess
+    for script in ["src/merge_all_competitions.py", "src/elo_multi.py"]:
+        result = subprocess.run(
+            [str(ROOT / "venv/bin/python"), str(ROOT / script)],
+            capture_output=True, text=True, timeout=180,
+        )
+        for line in result.stdout.splitlines()[-4:]:
+            print(f"   {line}")
+    # Actualizar mini/mini_final_elo.json con el cross-league (usado por predictores)
+    import shutil
+    src = PROC / "final_elo_ratings_multi.json"
+    dst = ROOT / "mini/mini_final_elo.json"
+    if src.exists():
+        shutil.copy(src, dst)
+        print(f"   ELO cross-league copiado a {dst.name} (para predictores)")
+
+
 def rebuild_elo(df: pd.DataFrame) -> dict:
     """Recomputa ELO histórico y guarda snapshot fresco."""
     print("\n📊 Fase 4 — recomputar ELO")
@@ -299,13 +331,15 @@ def main():
 
     if not args.no_download:
         download_footballdata_incremental()
+        refresh_champions()  # ← NUEVO: Champions League desde openfootball
         if args.with_understat:
             download_understat_incremental()
     else:
         print("Skip descargas (--no-download).")
 
     df = rebuild_matches_parquet()
-    ratings = rebuild_elo(df)
+    ratings = rebuild_elo(df)                # ELO solo domésticas (guardado como final_elo_ratings.json)
+    rebuild_multi_and_elo()                  # ← NUEVO: ELO cross-league con Champions (guardado como final_elo_ratings_multi.json)
     compare_with_previous_snapshot(ratings)
     top_ratings(ratings, n=20)
 
