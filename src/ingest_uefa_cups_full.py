@@ -87,6 +87,56 @@ def clean_team(t: str) -> str:
     return t
 
 
+def extract_from_ko_tables(html: str, season_label: str) -> list[dict]:
+    """Extrae partidos KO stage con formato Team 1 / Team 2 / 1st leg / 2nd leg.
+    - 1st leg: Team 1 = local, Team 2 = visitante
+    - 2nd leg: Team 2 = local, Team 1 = visitante
+    """
+    try:
+        tables = pd.read_html(StringIO(html))
+    except Exception:
+        return []
+    partidos = []
+    for t in tables:
+        if isinstance(t.columns, pd.MultiIndex):
+            t.columns = [" ".join(str(c).strip() for c in col if c and str(c) != "nan").strip()
+                         for col in t.columns]
+        cols_str = " ".join(str(c) for c in t.columns).lower()
+        # Detectar formato KO
+        if not ("team 1" in cols_str and "team 2" in cols_str
+                and "1st leg" in cols_str and "2nd leg" in cols_str):
+            continue
+        # Encontrar columnas exactas
+        c_team1 = next((c for c in t.columns if "team 1" in str(c).lower()), None)
+        c_team2 = next((c for c in t.columns if "team 2" in str(c).lower()), None)
+        c_leg1 = next((c for c in t.columns if "1st leg" in str(c).lower()), None)
+        c_leg2 = next((c for c in t.columns if "2nd leg" in str(c).lower()), None)
+        if not all([c_team1, c_team2, c_leg1, c_leg2]):
+            continue
+        for _, row in t.iterrows():
+            t1 = clean_team(str(row[c_team1]))
+            t2 = clean_team(str(row[c_team2]))
+            if not t1 or not t2:
+                continue
+            # 1st leg: T1 local, T2 visitante
+            score1 = parse_score(row[c_leg1])
+            if score1:
+                partidos.append({
+                    "home_team": t1, "away_team": t2,
+                    "home_goals": score1[0], "away_goals": score1[1],
+                    "season": season_label, "phase": "ko_leg1",
+                })
+            # 2nd leg: T2 local, T1 visitante
+            score2 = parse_score(row[c_leg2])
+            if score2:
+                partidos.append({
+                    "home_team": t2, "away_team": t1,
+                    "home_goals": score2[0], "away_goals": score2[1],
+                    "season": season_label, "phase": "ko_leg2",
+                })
+    return partidos
+
+
 def extract_from_group_standings(html: str, season_label: str) -> list[dict]:
     """Extrae de standings de group stage clásico.
     Wikipedia usa formato: [Pos, Team, Pld, W, D, L, GF, GA, GD, Pts, Qualification, ...códigos rival 3-letras...]
@@ -299,6 +349,7 @@ def scrape_competition(competition: str, seasons: list[tuple[int, int]]) -> pd.D
             partidos = extract_from_linear_tables(html, season_label)
             partidos += extract_from_group_standings(html, season_label)
             partidos += extract_from_cross_tables(html, season_label)
+            partidos += extract_from_ko_tables(html, season_label)
             new = 0
             for p in partidos:
                 key = (p["home_team"], p["away_team"], p["home_goals"], p["away_goals"], season_label)
