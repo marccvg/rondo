@@ -124,21 +124,17 @@ def load_champions():
     return out
 
 
-def load_europa():
-    """Europa League parcial (24/25 y 25/26 vía Wikipedia scrapper)."""
-    europa_path = ROOT / "data/raw/europa/europa_league_wikipedia.parquet"
-    if not europa_path.exists():
-        print("(Europa parquet no existe, skip)")
+def _load_uefa_cup(path: Path, competition_label: str) -> pd.DataFrame:
+    if not path.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(europa_path)
+    df = pd.read_parquet(path)
     df["home_team_norm"] = df["home_team"].apply(lambda t: CHAMPIONS_ALIAS.get(t, t))
     df["away_team_norm"] = df["away_team"].apply(lambda t: CHAMPIONS_ALIAS.get(t, t))
-    # Fechas ficticias por temporada (mediana de temporada Europa)
-    season_to_date = {"24-25": "2024-11-15", "25-26": "2025-11-15"}
-    df["date"] = pd.to_datetime(df["season"].map(season_to_date))
+    # Fecha aproximada por temporada (mediana): noviembre año inicial
+    df["date"] = pd.to_datetime(df["season"].apply(lambda s: f"20{s[:2]}-11-15"))
     out = pd.DataFrame({
         "date": df["date"],
-        "league": "europa",
+        "league": competition_label.replace("_", ""),
         "season": df["season"].apply(lambda s: f"20{s[:2]}-{s[3:5]}"),
         "home_team": df["home_team_norm"],
         "away_team": df["away_team_norm"],
@@ -149,9 +145,23 @@ def load_europa():
         "pinnacle_home": float("nan"),
         "pinnacle_draw": float("nan"),
         "pinnacle_away": float("nan"),
-        "competition": "europa_league",
+        "competition": competition_label,
     })
     return out
+
+
+def load_europa():
+    """Europa League completa (17/18-25/26 via Wikipedia scraper mejorado)."""
+    full = _load_uefa_cup(ROOT / "data/raw/uefa_cups/europa_league_full.parquet", "europa_league")
+    if len(full) > 0:
+        return full
+    # Fallback al parcial antiguo
+    return _load_uefa_cup(ROOT / "data/raw/europa/europa_league_wikipedia.parquet", "europa_league")
+
+
+def load_conference():
+    """Conference League completa (21/22-25/26)."""
+    return _load_uefa_cup(ROOT / "data/raw/uefa_cups/conference_league_full.parquet", "conference_league")
 
 
 def main():
@@ -165,6 +175,9 @@ def main():
     europa = load_europa()
     print(f"Europa:     {len(europa):,} partidos")
 
+    conference = load_conference()
+    print(f"Conference: {len(conference):,} partidos")
+
     # Filtrar champions solo desde 2017-08 (que es cuando arranca nuestro dataset)
     champs_filtered = champs[champs["date"] >= dom["date"].min()].copy()
     print(f"Champions filtrados (post {dom['date'].min().date()}): {len(champs_filtered):,}")
@@ -176,7 +189,7 @@ def main():
     print(f"Equipos Champions NO conocidos: {len(new_teams)} (empezarán ELO 1500)")
 
     # Unificar
-    combined = pd.concat([dom, champs_filtered, europa], ignore_index=True)
+    combined = pd.concat([dom, champs_filtered, europa, conference], ignore_index=True)
     combined = combined.sort_values("date").reset_index(drop=True)
     combined = combined.dropna(subset=["home_goals", "away_goals"])
 
