@@ -327,7 +327,7 @@ def urls_for(competition: str, y1: int, y2: int) -> list[str]:
     else:
         raise ValueError(competition)
 
-    return [
+    urls = [
         # Fase principal
         f"https://en.wikipedia.org/wiki/{slug}_{base}_league_phase",     # 24/25+
         f"https://en.wikipedia.org/wiki/{slug}_{base}_group_stage",     # <=23/24
@@ -335,13 +335,24 @@ def urls_for(competition: str, y1: int, y2: int) -> list[str]:
         f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_phase",
         f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_stage",
         f"https://en.wikipedia.org/wiki/{slug}_{base}_knockout_round_play-offs",
-        # Qualifying rounds (equipos menores, pre-group stage)
-        f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying_rounds_and_play-off_round",
-        f"https://en.wikipedia.org/wiki/{slug}_{base}_first_qualifying_round",
-        f"https://en.wikipedia.org/wiki/{slug}_{base}_second_qualifying_round",
-        f"https://en.wikipedia.org/wiki/{slug}_{base}_third_qualifying_round",
-        f"https://en.wikipedia.org/wiki/{slug}_{base}_play-off_round",
     ]
+    # Qualifying rounds - Europa vs Conference usan URLs distintas
+    if competition == "europa":
+        urls += [
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying_rounds_and_play-off_round",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_first_qualifying_round",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_second_qualifying_round",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_third_qualifying_round",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_play-off_round",
+        ]
+    elif competition == "conference":
+        # Conference usa URLs con paréntesis
+        urls += [
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying_(first_and_second_round_matches)",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying_(third_and_play-off_round_matches)",
+            f"https://en.wikipedia.org/wiki/{slug}_{base}_qualifying",
+        ]
+    return urls
 
 
 def scrape_competition(competition: str, seasons: list[tuple[int, int]]) -> pd.DataFrame:
