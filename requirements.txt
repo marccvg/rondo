@@ -24,3 +24,4 @@ streamlit>=1.35
 # Dev / tests
 pytest>=8.0
 nbstripout>=0.7
+plotly>=6.0
