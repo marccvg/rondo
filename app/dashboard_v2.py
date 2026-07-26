@@ -108,6 +108,7 @@ st.sidebar.markdown("**Datos**: 23.537 partidos, 9 competiciones, ELO UEFA-calib
 page = st.sidebar.radio("Sección:", [
     "🏠 Home",
     "⚽ Simulador 1v1",
+    "🏆 Simular campeonato",
     "📊 Ranking por competición",
     "🇪🇺 Comparativa cross-liga",
     "📈 Evolución temporal ELO",
@@ -240,6 +241,307 @@ elif page == "⚽ Simulador 1v1":
     cm1, cm2 = st.columns(2)
     cm1.metric("P(Over 2.5 goles)", f"{pred['P_over25']*100:.1f}%")
     cm2.metric("P(Ambos marcan)", f"{pred['P_btts']*100:.1f}%")
+
+
+# ═══════════════ PÁGINA SIMULAR CAMPEONATO ═══════════════
+elif page == "🏆 Simular campeonato":
+    st.title("🏆 Simular campeonato")
+    st.markdown("Monte Carlo: simula la competición N veces y calcula probabilidades por posición.")
+
+    from collections import Counter, defaultdict
+    import random
+
+    comp_type = st.radio("Tipo de competición:", ["🇪🇸 Liga doméstica", "🇪🇺 UEFA cup (Swiss format)"],
+                         horizontal=True)
+
+    n_sims = st.slider("Número de simulaciones", 500, 20000, 5000, step=500,
+                      help="Más simulaciones = probabilidades más estables (pero más lento)")
+
+    # Función core de simulación de partido devuelve goles
+    rng_ = np.random.default_rng(42)
+    def sim_goals(eh, ea, neutral=False):
+        ha = 0 if neutral else HOME_ADV
+        diff = eh - ea
+        lh = np.exp(POISSON["α_H"] + POISSON["β_H"] * diff)
+        la = np.exp(POISSON["α_A"] + POISSON["β_A"] * diff)
+        if neutral:
+            avg = np.sqrt(lh * la); lh, la = avg, avg
+        return rng_.poisson(lh), rng_.poisson(la)
+
+    # -------- SIMULACIÓN LIGA --------
+    if comp_type == "🇪🇸 Liga doméstica":
+        liga_name = st.selectbox("Liga:", list(COUNTRY_BY_COMP.keys()),
+                                format_func=lambda x: COUNTRY_BY_COMP[x])
+        teams = sorted(set(df_all[(df_all["competition"] == liga_name) &
+                                   (df_all["season"] == "2025-26")]["home_team"]))
+        st.markdown(f"**{len(teams)} equipos** (composición temporada 25/26)")
+
+        with st.expander("Ver equipos participantes"):
+            df_p = pd.DataFrame([{"Equipo": t, "ELO": elos.get(t, 1500)} for t in teams]).sort_values("ELO", ascending=False)
+            st.dataframe(df_p, use_container_width=True)
+
+        if st.button(f"▶️ Simular {n_sims:,} temporadas", type="primary"):
+            champion_c = Counter()
+            top4_c = Counter()
+            top6_c = Counter()
+            releg_c = Counter()
+            avg_position = defaultdict(list)
+
+            progress = st.progress(0)
+            status = st.empty()
+            for sim in range(n_sims):
+                if sim % max(n_sims//20, 1) == 0:
+                    progress.progress(sim/n_sims)
+                    status.text(f"Simulación {sim:,} / {n_sims:,}")
+                pts = defaultdict(int); gd = defaultdict(int)
+                for i in range(len(teams)):
+                    for j in range(len(teams)):
+                        if i == j: continue
+                        h, a = teams[i], teams[j]
+                        gh, ga = sim_goals(elos.get(h, 1500), elos.get(a, 1500))
+                        gd[h] += gh - ga; gd[a] += ga - gh
+                        if gh > ga: pts[h] += 3
+                        elif gh < ga: pts[a] += 3
+                        else: pts[h] += 1; pts[a] += 1
+                ranked = sorted(teams, key=lambda t: (-pts[t], -gd[t]))
+                champion_c[ranked[0]] += 1
+                for t in ranked[:4]: top4_c[t] += 1
+                for t in ranked[:6]: top6_c[t] += 1
+                for t in ranked[-3:]: releg_c[t] += 1
+                for pos, t in enumerate(ranked, 1):
+                    avg_position[t].append(pos)
+            progress.progress(1.0); status.text(f"✅ {n_sims:,} simulaciones completadas")
+
+            st.markdown(f"### 🏆 Probabilidad campeón — {liga_name}")
+            df_ch = pd.DataFrame([{"Equipo": t, "Prob (%)": c/n_sims*100} for t, c in champion_c.most_common(10)])
+            fig = px.bar(df_ch, x="Prob (%)", y="Equipo", orientation="h", text="Prob (%)",
+                         color="Prob (%)", color_continuous_scale="Greens", height=400)
+            fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### 🥇 Probabilidad Top 4")
+                df_t4 = pd.DataFrame([{"Equipo": t, "Prob (%)": c/n_sims*100} for t, c in top4_c.most_common(8)])
+                fig4 = px.bar(df_t4, x="Prob (%)", y="Equipo", orientation="h", text="Prob (%)",
+                              color="Prob (%)", color_continuous_scale="Blues", height=400)
+                fig4.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                fig4.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig4, use_container_width=True)
+            with c2:
+                st.markdown("### 📉 Probabilidad descenso")
+                df_rel = pd.DataFrame([{"Equipo": t, "Prob (%)": c/n_sims*100} for t, c in releg_c.most_common(8)])
+                fig_r = px.bar(df_rel, x="Prob (%)", y="Equipo", orientation="h", text="Prob (%)",
+                               color="Prob (%)", color_continuous_scale="Reds", height=400)
+                fig_r.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                fig_r.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_r, use_container_width=True)
+
+            # Posición media esperada
+            st.markdown("### 📊 Posición media esperada por equipo")
+            df_avg = pd.DataFrame([
+                {"Equipo": t, "Posición media": np.mean(positions), "std": np.std(positions)}
+                for t, positions in avg_position.items()
+            ]).sort_values("Posición media").reset_index(drop=True)
+            df_avg.index += 1
+            df_avg["Prob campeón (%)"] = df_avg["Equipo"].map(lambda t: champion_c.get(t, 0)/n_sims*100)
+            df_avg["Prob descenso (%)"] = df_avg["Equipo"].map(lambda t: releg_c.get(t, 0)/n_sims*100)
+            st.dataframe(df_avg.round(2), use_container_width=True)
+
+    # -------- SIMULACIÓN UEFA SWISS --------
+    else:
+        # Pools por competición
+        POOLS = {
+            "Champions League": [
+                "Bayern Munich", "Arsenal", "Paris SG", "Barcelona", "Real Madrid",
+                "Sp Lisbon", "Inter", "Benfica", "Man City", "Porto",
+                "Dortmund", "Roma", "Man United", "Liverpool", "Leverkusen",
+                "Napoli", "Juventus", "Ath Madrid", "Marseille", "Villarreal",
+                "AFC Ajax", "PSV", "Feyenoord", "Club Brugge KV", "FC Red Bull Salzburg",
+                "Celtic FC", "Slavia Prague", "Sparta Praha", "Galatasaray", "Fenerbahçe",
+                "Kairat Almaty", "Pafos FC", "Qarabağ", "Olympiacos", "Union Saint-Gilloise",
+                "Bodø/Glimt",
+            ],
+            "Europa League": [
+                "Aston Villa", "Bologna", "Nott'm Forest", "Betis", "Lyon",
+                "Fenerbahçe", "Rangers", "Ferencváros", "Sturm Graz", "Ludogorets",
+                "Malmö FF", "Nice", "Panathinaikos", "Braga", "Sp Braga",
+                "Genk", "Freiburg", "Utrecht", "AZ", "Fribourg",
+                "Basel", "FC Basel 1893", "Salzburg", "Viktoria Plzeň", "Legia Warszawa",
+                "PAOK", "Celta", "Getafe", "Midtjylland", "Steaua",
+                "Stuttgart", "Roma", "Lille", "Real Sociedad", "Union Berlin",
+                "Bologna",
+            ],
+            "Conference League": [
+                "Chelsea", "Fiorentina", "Sivasspor", "Molde", "Copenhagen",
+                "Legia Warszawa", "Slovan Bratislava", "APOEL Nikosia", "AEK Athen",
+                "Rijeka", "Rapid Wien", "Trabzonspor", "Djurgården", "Bodø/Glimt",
+                "Rangers", "Anderlecht", "Twente", "Vitesse", "Universitatea Craiova",
+                "Ludogorets", "Ferencváros", "Riga", "Häcken", "Astana",
+                "Malmö FF", "AIK", "IFK Göteborg", "Elfsborg", "BK Häcken",
+                "Cluj", "Sparta Praha", "Slavia Prague", "Sturm Graz", "Hearts",
+                "Motherwell", "Larne",
+            ],
+        }
+
+        comp_ucl = st.selectbox("Competición UEFA:", list(POOLS.keys()))
+        n_teams = st.slider("Nº equipos (formato Swiss)", 24, 36, 36, step=4)
+
+        pool = POOLS[comp_ucl][:n_teams]
+        # Rellenar si faltan con top ELO
+        if len(pool) < n_teams:
+            other = [t for t in sorted(elos, key=lambda x: -elos[x]) if t not in pool]
+            pool = pool + other[:n_teams - len(pool)]
+        pool = pool[:n_teams]
+
+        st.markdown(f"**{n_teams} equipos** — formato Swiss (cada equipo juega 8 partidos)")
+        with st.expander("Ver equipos + ELO"):
+            df_pool = pd.DataFrame([{"Equipo": t, "ELO": elos.get(t, 1500)} for t in pool]).sort_values("ELO", ascending=False).reset_index(drop=True)
+            df_pool.index += 1
+            st.dataframe(df_pool, use_container_width=True)
+
+        if st.button(f"▶️ Simular {n_sims:,} temporadas Swiss + KO", type="primary"):
+            champion_c = Counter()
+            final_c = Counter()
+            semi_c = Counter()
+            quarter_c = Counter()
+            round16_c = Counter()
+            top8_c = Counter()  # top 8 fase liga = pasan directo a octavos
+
+            # Bombos por ELO (4 pots)
+            pool_sorted = sorted(pool, key=lambda t: -elos.get(t, 1500))
+            pot_size = n_teams // 4
+            pots = [pool_sorted[i*pot_size:(i+1)*pot_size] for i in range(4)]
+
+            progress = st.progress(0)
+            status = st.empty()
+
+            for sim in range(n_sims):
+                if sim % max(n_sims//20, 1) == 0:
+                    progress.progress(sim/n_sims)
+                    status.text(f"Simulando {sim:,}/{n_sims:,}...")
+
+                # ===== FASE LIGA (Swiss) =====
+                # Cada equipo juega 2 vs cada pot (1 local, 1 visitante)
+                pts = defaultdict(int); gd = defaultdict(int); gf = defaultdict(int)
+                for team in pool:
+                    team_pot = next(i for i, pot in enumerate(pots) if team in pot)
+                    for opp_pot_idx in range(4):
+                        opps = [t for t in pots[opp_pot_idx] if t != team]
+                        rng_.shuffle(opps)
+                        # 1 partido de local, 1 de visitante
+                        for k, opp in enumerate(opps[:2]):
+                            if k == 0:  # team local
+                                gh, ga = sim_goals(elos.get(team, 1500), elos.get(opp, 1500))
+                                gf[team] += gh; gf[opp] += ga
+                                gd[team] += gh - ga; gd[opp] += ga - gh
+                                if gh > ga: pts[team] += 3
+                                elif gh < ga: pts[opp] += 3
+                                else: pts[team] += 1; pts[opp] += 1
+                # Ranking fase liga
+                ranked_liga = sorted(pool, key=lambda t: (-pts[t], -gd[t], -gf[t]))
+                for t in ranked_liga[:8]: top8_c[t] += 1
+
+                # Top 8 → directo a octavos
+                # 9-24 → knockout play-off (16 equipos → 8 pares → 8 clasificados)
+                # 25-36 → eliminados
+                if n_teams >= 24:
+                    direct_to_r16 = ranked_liga[:8]
+                    playoff_teams = ranked_liga[8:24]
+                    rng_.shuffle(playoff_teams)
+                    r16_from_playoff = []
+                    for k in range(8):
+                        h, a = playoff_teams[2*k], playoff_teams[2*k+1]
+                        g1h, g1a = sim_goals(elos.get(h, 1500), elos.get(a, 1500))
+                        g2h, g2a = sim_goals(elos.get(a, 1500), elos.get(h, 1500))
+                        agg_h, agg_a = g1h + g2a, g1a + g2h
+                        winner = h if agg_h > agg_a else (a if agg_a > agg_h else (h if rng_.random() < 0.5 else a))
+                        r16_from_playoff.append(winner)
+                    round16_teams = direct_to_r16 + r16_from_playoff
+                else:
+                    round16_teams = ranked_liga[:16]
+
+                for t in round16_teams: round16_c[t] += 1
+
+                # OCTAVOS
+                rng_.shuffle(round16_teams)
+                quarters = []
+                for k in range(8):
+                    h, a = round16_teams[2*k], round16_teams[2*k+1]
+                    g1h, g1a = sim_goals(elos.get(h, 1500), elos.get(a, 1500))
+                    g2h, g2a = sim_goals(elos.get(a, 1500), elos.get(h, 1500))
+                    agg_h, agg_a = g1h + g2a, g1a + g2h
+                    winner = h if agg_h > agg_a else (a if agg_a > agg_h else (h if rng_.random() < 0.5 else a))
+                    quarters.append(winner); quarter_c[winner] += 1
+
+                rng_.shuffle(quarters)
+                semis = []
+                for k in range(4):
+                    h, a = quarters[2*k], quarters[2*k+1]
+                    g1h, g1a = sim_goals(elos.get(h, 1500), elos.get(a, 1500))
+                    g2h, g2a = sim_goals(elos.get(a, 1500), elos.get(h, 1500))
+                    agg_h, agg_a = g1h + g2a, g1a + g2h
+                    winner = h if agg_h > agg_a else (a if agg_a > agg_h else (h if rng_.random() < 0.5 else a))
+                    semis.append(winner); semi_c[winner] += 1
+
+                rng_.shuffle(semis)
+                finalists = []
+                for k in range(2):
+                    h, a = semis[2*k], semis[2*k+1]
+                    g1h, g1a = sim_goals(elos.get(h, 1500), elos.get(a, 1500))
+                    g2h, g2a = sim_goals(elos.get(a, 1500), elos.get(h, 1500))
+                    agg_h, agg_a = g1h + g2a, g1a + g2h
+                    winner = h if agg_h > agg_a else (a if agg_a > agg_h else (h if rng_.random() < 0.5 else a))
+                    finalists.append(winner); final_c[winner] += 1
+
+                h, a = finalists
+                gh, ga = sim_goals(elos.get(h, 1500), elos.get(a, 1500), neutral=True)
+                winner = h if gh > ga else (a if ga > gh else (h if rng_.random() < 0.5 else a))
+                champion_c[winner] += 1
+
+            progress.progress(1.0); status.text(f"✅ {n_sims:,} simulaciones completadas")
+
+            # Resultados
+            st.markdown(f"### 🏆 Probabilidad CAMPEÓN — {comp_ucl}")
+            df_ch = pd.DataFrame([{"Equipo": t, "Prob (%)": c/n_sims*100} for t, c in champion_c.most_common(15)])
+            fig = px.bar(df_ch, x="Prob (%)", y="Equipo", orientation="h", text="Prob (%)",
+                         color="Prob (%)", color_continuous_scale="Blues", height=500)
+            fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+            fig.update_layout(yaxis={'categoryorder':'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Tabla completa avance por rondas
+            st.markdown("### 📊 Probabilidad avanzar a cada ronda (todos los equipos)")
+            rows = []
+            for t in pool:
+                rows.append({
+                    "Equipo": t,
+                    "ELO": elos.get(t, 1500),
+                    "Top 8 fase liga (%)": top8_c[t]/n_sims*100,
+                    "Octavos (%)": round16_c[t]/n_sims*100,
+                    "Cuartos (%)": quarter_c[t]/n_sims*100,
+                    "Semis (%)": semi_c[t]/n_sims*100,
+                    "Final (%)": final_c[t]/n_sims*100,
+                    "🏆 Campeón (%)": champion_c[t]/n_sims*100,
+                })
+            df_avance = pd.DataFrame(rows).sort_values("🏆 Campeón (%)", ascending=False).reset_index(drop=True)
+            df_avance.index += 1
+            st.dataframe(df_avance.round(2), use_container_width=True, height=500)
+
+            # Gráfica "funnel" top 8 avance rondas
+            top8 = df_avance.head(8)
+            st.markdown("### 📉 Funnel avance rondas — top 8 favoritos")
+            fig_funnel = go.Figure()
+            for _, row in top8.iterrows():
+                fig_funnel.add_trace(go.Scatter(
+                    x=["Top 8", "Octavos", "Cuartos", "Semis", "Final", "Campeón"],
+                    y=[row["Top 8 fase liga (%)"], row["Octavos (%)"], row["Cuartos (%)"],
+                       row["Semis (%)"], row["Final (%)"], row["🏆 Campeón (%)"]],
+                    mode="lines+markers", name=row["Equipo"],
+                ))
+            fig_funnel.update_layout(height=500, yaxis_title="Probabilidad (%)")
+            st.plotly_chart(fig_funnel, use_container_width=True)
 
 
 # ═══════════════ PÁGINA RANKING POR COMPETICIÓN ═══════════════
