@@ -102,6 +102,7 @@ st.sidebar.markdown("---")
 
 page = st.sidebar.radio("Sección:", [
     "🏠 Home",
+    "👤 Mi Equipo (asistente)",
     "🎯 Top predicciones",
     "💰 Value picks",
     "🏆 Optimizador plantilla",
@@ -135,6 +136,235 @@ if page == "🏠 Home":
         ["name", "team", "position", "value_M", "total_points", "form", "selected_pct", "pred_points"]
     ]
     st.dataframe(top20.reset_index(drop=True), use_container_width=True)
+
+# ═══════════════ PÁGINA MI EQUIPO — ASISTENTE PRÁCTICO ═══════════════
+elif page == "👤 Mi Equipo (asistente)":
+    st.title("👤 Mi Equipo — asistente semanal FPL")
+    st.markdown("Configura tu equipo actual y el modelo te dice qué hacer esta jornada.")
+
+    # Método de carga
+    load_method = st.radio("¿Cómo cargas tu equipo?", ["🔗 Automático (Team ID FPL)", "✍️ Manual"], horizontal=True)
+
+    my_team = None
+    my_bank = 0.0
+    my_free_transfers = 1
+
+    if load_method == "🔗 Automático (Team ID FPL)":
+        st.info("Tu Team ID está en la URL cuando entras a 'Points' en fantasy.premierleague.com — algo como `/entry/123456/`")
+        team_id = st.number_input("Team ID FPL:", min_value=1, value=1, step=1)
+        if st.button("📥 Cargar mi equipo"):
+            import requests
+            try:
+                # Endpoint público FPL
+                r = requests.get(f"https://fantasy.premierleague.com/api/entry/{team_id}/", timeout=15)
+                if r.status_code == 200:
+                    entry = r.json()
+                    current_gw = entry.get("current_event", 1)
+                    my_bank = entry.get("last_deadline_bank", 0) / 10
+                    my_free_transfers = entry.get("last_deadline_total_transfers", 0)
+                    st.success(f"✅ {entry.get('name', 'Equipo')} — GW{current_gw} — Banco £{my_bank:.1f}M")
+
+                    # Cargar picks
+                    r2 = requests.get(f"https://fantasy.premierleague.com/api/entry/{team_id}/event/{current_gw}/picks/", timeout=15)
+                    if r2.status_code == 200:
+                        picks = r2.json()["picks"]
+                        player_ids = [p["element"] for p in picks]
+                        my_team_df = df_players[df_players["id"].isin(player_ids)].copy()
+                        st.session_state["my_team"] = my_team_df
+                        st.session_state["my_bank"] = my_bank
+                        st.session_state["my_free_transfers"] = 1
+                else:
+                    st.error(f"No se pudo cargar Team ID {team_id} (HTTP {r.status_code})")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    else:  # Manual
+        st.markdown("### Selecciona tus 15 jugadores")
+        c1, c2, c3, c4 = st.columns(4)
+
+        # Filtrar por posición para selección
+        gks = sorted(df_players[df_players["position"] == "GK"]["name"].tolist())
+        defs = sorted(df_players[df_players["position"] == "DEF"]["name"].tolist())
+        mids = sorted(df_players[df_players["position"] == "MID"]["name"].tolist())
+        fwds = sorted(df_players[df_players["position"] == "FWD"]["name"].tolist())
+
+        with c1:
+            st.markdown("**Porteros (2)**")
+            sel_gks = st.multiselect("GK:", gks, default=gks[:2] if len(gks) >= 2 else [])
+        with c2:
+            st.markdown("**Defensas (5)**")
+            sel_defs = st.multiselect("DEF:", defs, default=defs[:5] if len(defs) >= 5 else [])
+        with c3:
+            st.markdown("**Mediocampistas (5)**")
+            sel_mids = st.multiselect("MID:", mids, default=mids[:5] if len(mids) >= 5 else [])
+        with c4:
+            st.markdown("**Delanteros (3)**")
+            sel_fwds = st.multiselect("FWD:", fwds, default=fwds[:3] if len(fwds) >= 3 else [])
+
+        selected_names = sel_gks + sel_defs + sel_mids + sel_fwds
+        if len(selected_names) == 15:
+            my_team_df = df_players[df_players["name"].isin(selected_names)].copy()
+            st.session_state["my_team"] = my_team_df
+
+            colb1, colb2 = st.columns(2)
+            with colb1:
+                bank = st.number_input("💰 Banco disponible (£M):", 0.0, 20.0, 2.0, step=0.1)
+                st.session_state["my_bank"] = bank
+            with colb2:
+                ft = st.number_input("🔄 Transferencias gratis restantes:", 0, 5, 1)
+                st.session_state["my_free_transfers"] = ft
+
+    # ═══════════════ Análisis del equipo ═══════════════
+    if "my_team" in st.session_state:
+        my_team_df = st.session_state["my_team"]
+        my_bank = st.session_state.get("my_bank", 0)
+        my_free_transfers = st.session_state.get("my_free_transfers", 1)
+
+        st.markdown("---")
+        st.markdown("## 📋 Tu equipo actual")
+
+        # Métricas globales
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Coste plantilla", f"£{my_team_df['value_M'].sum():.1f}M")
+        c2.metric("Banco disponible", f"£{my_bank:.1f}M")
+        c3.metric("Presupuesto total", f"£{my_team_df['value_M'].sum() + my_bank:.1f}M")
+        c4.metric("Transferencias gratis", my_free_transfers)
+
+        # Tabla equipo con predicciones
+        for pos in ["GK", "DEF", "MID", "FWD"]:
+            sub = my_team_df[my_team_df["position"] == pos].sort_values("pred_points", ascending=False)
+            st.markdown(f"#### {pos} ({len(sub)})")
+            st.dataframe(sub[["name", "team", "value_M", "pred_points", "form", "selected_pct"]].reset_index(drop=True),
+                         use_container_width=True)
+
+        st.markdown("---")
+
+        # ═══════════════ RECOMENDACIONES ═══════════════
+        st.markdown("## 🎯 Recomendaciones semanales")
+
+        # 1. Capitán óptimo
+        st.markdown("### ⭐ 1. Capitán de la semana (puntos ×2)")
+        top3_capt = my_team_df.nlargest(3, "pred_points")[["name", "team", "position", "pred_points"]]
+        c1, c2, c3 = st.columns(3)
+        for col, (_, r) in zip([c1, c2, c3], top3_capt.iterrows()):
+            with col:
+                st.metric(f"{'👑 ' if _ == top3_capt.index[0] else ''}{r['name']}",
+                          f"{r['pred_points']:.2f} pts",
+                          f"×2 = {r['pred_points']*2:.2f} pts")
+
+        # 2. XI titular óptimo (de tus 15)
+        st.markdown("### 🏟️ 2. XI titular óptimo (de tus 15 jugadores)")
+        # LP simple: elegir 11 mejores respetando formación válida
+        d = my_team_df.reset_index(drop=True)
+        n = len(d)
+        prob = pulp.LpProblem("xi", pulp.LpMaximize)
+        x = [pulp.LpVariable(f"x_{i}", cat="Binary") for i in range(n)]
+        prob += pulp.lpSum(x[i] * d.loc[i, "pred_points"] for i in range(n))
+        prob += pulp.lpSum(x[i] for i in range(n)) == 11
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "GK") == 1
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "DEF") >= 3
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "DEF") <= 5
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "MID") >= 3
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "MID") <= 5
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "FWD") >= 1
+        prob += pulp.lpSum(x[i] for i in range(n) if d.loc[i, "position"] == "FWD") <= 3
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10))
+        selected = [i for i in range(n) if x[i].value() == 1]
+        xi = d.loc[selected]
+        bench = d.drop(selected)
+
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.markdown(f"**Titulares (11)** — pts esperados: {xi['pred_points'].sum():.2f}")
+            for pos in ["GK", "DEF", "MID", "FWD"]:
+                sub = xi[xi["position"] == pos].sort_values("pred_points", ascending=False)
+                if len(sub) > 0:
+                    st.markdown(f"*{pos}*: " + ", ".join(sub["name"].tolist()))
+        with c2:
+            st.markdown(f"**Banquillo (4)** — {bench['pred_points'].sum():.2f} pts")
+            for _, r in bench.sort_values("pred_points", ascending=False).iterrows():
+                st.write(f"• {r['name']} ({r['position']})")
+
+        # 3. Transferencias sugeridas
+        st.markdown("### 🔄 3. Transferencias sugeridas")
+        st.markdown(f"""
+        Regla: cada transferencia adicional a la {my_free_transfers} gratis cuesta **−4 puntos** (hit).
+        Solo se sugieren swaps con **delta esperado > 4 puntos** (superan el hit).
+        """)
+
+        # Para cada jugador tuyo, buscar mejor reemplazo en su posición dentro de presupuesto
+        max_transfers = st.slider("Máx sugerencias a mostrar:", 1, 10, 5)
+        my_names = set(my_team_df["name"])
+        my_team_ids = set(my_team_df["id"])
+
+        suggestions = []
+        for _, mine in my_team_df.iterrows():
+            # Presupuesto para reemplazo = venta jugador + banco
+            budget_for_swap = mine["value_M"] + my_bank
+            # Candidatos: mismos position, dentro de presupuesto, no en mi equipo, no exceder 3 por club actuales
+            club_count = my_team_df["team"].value_counts()
+            def can_add(team_name):
+                current = club_count.get(team_name, 0)
+                if mine["team"] == team_name:
+                    return True  # sustituimos por otro del mismo club
+                return current < 3
+
+            candidates = df_players[
+                (df_players["position"] == mine["position"]) &
+                (df_players["value_M"] <= budget_for_swap) &
+                (~df_players["name"].isin(my_names)) &
+                (df_players["team"].apply(can_add))
+            ]
+            if len(candidates) == 0: continue
+            best = candidates.nlargest(1, "pred_points").iloc[0]
+            delta = best["pred_points"] - mine["pred_points"]
+            if delta > 0:
+                suggestions.append({
+                    "Vender": mine["name"], "Team out": mine["team"], "Pos": mine["position"],
+                    "Precio venta (£M)": mine["value_M"], "Pts esp. actual": mine["pred_points"],
+                    "Comprar": best["name"], "Team in": best["team"],
+                    "Precio compra (£M)": best["value_M"], "Pts esp. nuevo": best["pred_points"],
+                    "Delta pts": delta, "Coste (£M)": best["value_M"] - mine["value_M"],
+                })
+
+        if suggestions:
+            df_sug = pd.DataFrame(suggestions).sort_values("Delta pts", ascending=False).head(max_transfers)
+            # Marcar si hit vale la pena
+            def worth_hit(row_idx, delta):
+                if row_idx < my_free_transfers:
+                    return "✅ Gratis"
+                elif delta > 4:
+                    return "✅ Merece hit −4"
+                else:
+                    return "⚠️ NO merece hit"
+            df_sug["Decisión"] = [worth_hit(i, d) for i, d in enumerate(df_sug["Delta pts"])]
+            st.dataframe(df_sug.round(2).reset_index(drop=True), use_container_width=True)
+
+            # Resumen
+            gratis = df_sug.head(my_free_transfers)
+            st.success(f"""
+            **Recomendación**: aprovecha tus **{my_free_transfers} transferencia(s) gratis**:
+            {' + '.join([f'{r["Vender"]}→{r["Comprar"]} (+{r["Delta pts"]:.2f} pts)' for _, r in gratis.iterrows()])}
+            """)
+        else:
+            st.info("Tu equipo ya está optimizado — no hay mejoras claras dentro del presupuesto.")
+
+        # 4. Chip advice
+        st.markdown("### 🎴 4. Consejo de chips")
+        avg_pts_team = my_team_df["pred_points"].mean()
+        max_capt_pts = my_team_df["pred_points"].max()
+        st.markdown(f"""
+        - **Triple Captain**: usar cuando tu mejor jugador tiene fixture MUY favorable.
+          Tu top actual = {top3_capt.iloc[0]['name']} con {max_capt_pts:.2f} pts.
+          Triple = {max_capt_pts*3:.2f} pts vs Capitán normal {max_capt_pts*2:.2f} = **+{max_capt_pts:.2f} pts extras**.
+          {'✅ Considera usar' if max_capt_pts > 6 else '⏸️ Espera mejor fixture'}
+        - **Bench Boost**: usar cuando tu banquillo tiene puntos esperados altos.
+          Tu bench actual = {bench['pred_points'].sum():.2f} pts. {'✅ Considera' if bench['pred_points'].sum() > 8 else '⏸️ Bench bajo, espera'}
+        - **Wildcard**: usar cuando >6 transferencias serían necesarias (rehacer plantilla).
+          Sugerencias actuales: {len(suggestions)}. {'✅ Considera wildcard' if len(suggestions) > 6 else '⏸️ No es necesario aún'}
+        - **Free Hit**: usar para 1 GW específica con doble jornada o muchos jugadores sin fixture.
+        """)
+
 
 # ═══════════════ PÁGINA TOP PREDICCIONES ═══════════════
 elif page == "🎯 Top predicciones":
